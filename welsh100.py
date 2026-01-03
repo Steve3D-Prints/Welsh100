@@ -18,7 +18,7 @@ PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
 st.set_page_config(page_title="Welsh 100 Tracker", layout="wide", initial_sidebar_state="expanded")
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
-# --- SESSION STATE MAGIC (Fixes Zombie Checkboxes) ---
+# --- SESSION STATE MAGIC ---
 if 'reset_id' not in st.session_state:
     st.session_state.reset_id = 0
 
@@ -41,6 +41,7 @@ if not os.path.exists(DATA_FILE):
     st.stop()
 
 df = pd.read_csv(DATA_FILE)
+# Cleanup Data
 df['Height_Display'] = df['Height']
 df['Height'] = df['Height'].astype(str).str.replace('m', '').str.replace(',', '').str.strip()
 df['Height'] = pd.to_numeric(df['Height'], errors='coerce').fillna(0).astype(int)
@@ -55,6 +56,10 @@ if os.path.exists(PROGRESS_FILE):
     progress_df['Bagged'] = progress_df['Bagged'].fillna(False).astype(bool)
 else:
     progress_df = pd.DataFrame({'Mountain': df['Mountain'], 'Bagged': False, 'Date': '', 'Photo': '', 'ActivityLink': ''})
+
+# Ensure ActivityLink column exists (for backward compatibility)
+if 'ActivityLink' not in progress_df.columns:
+    progress_df['ActivityLink'] = ''
 
 full_data = pd.merge(df, progress_df, on='Mountain', how='left')
 full_data['Bagged'] = full_data['Bagged'].fillna(False)
@@ -89,11 +94,19 @@ with tab1:
     for _, row in full_data.iterrows():
         color = "green" if row['Bagged'] else "red"
         icon = "flag" if row['Bagged'] else "mountain"
+        
+        # Pop-up Logic
         img_html = ""
         if row['Bagged'] and row['Photo'] and os.path.exists(row['Photo']):
             with open(row['Photo'], 'rb') as f: b64_img = base64.b64encode(f.read()).decode()
             img_html = f'<br><img src="data:image/jpeg;base64,{b64_img}" style="width:100%; border-radius:5px;">'
-        popup_html = f"""<div style="font-family:sans-serif; width:200px;"><h4 style="margin-bottom:0; color:{'#00AB66' if row['Bagged'] else '#C8102E'}">{row['Mountain']}</h4><small>{row['Height']}m</small><br><b>{row['Region']}</b>{img_html}</div>"""
+        
+        link_html = ""
+        if row['Bagged'] and row['ActivityLink']:
+            link_html = f'<br><a href="{row["ActivityLink"]}" target="_blank" style="text-decoration:none; color:#00AB66; font-weight:bold;">🔗 View Activity</a>'
+
+        popup_html = f"""<div style="font-family:sans-serif; width:200px;"><h4 style="margin-bottom:0; color:{'#00AB66' if row['Bagged'] else '#C8102E'}">{row['Mountain']}</h4><small>{row['Height']}m</small><br><b>{row['Region']}</b>{link_html}{img_html}</div>"""
+        
         folium.Marker(location=[row['Latitude'], row['Longitude']], popup=folium.Popup(popup_html, max_width=250), icon=folium.Icon(color=color, icon=icon, prefix="fa")).add_to(m)
     st_folium(m, width=None, height=600)
 
@@ -109,53 +122,64 @@ with tab2:
 
     for idx, row in view_df.iterrows():
         with st.expander(f"{'✅' if row['Bagged'] else '⬜'} {row['Mountain']} - {row['Height']}m"):
+            # Unique Key for this item
+            unique_key = f"chk_{idx}_{row['Mountain']}_{st.session_state.reset_id}"
+
+            # --- ROW 1: Checkbox + Date ---
             c1, c2 = st.columns([1, 2])
             with c1:
-                # MAGIC FIX: We append 'reset_id' to the key. 
-                # When reset_id changes, Streamlit thinks this is a totally new button and forgets the old click.
-                unique_key = f"chk_{idx}_{row['Mountain']}_{st.session_state.reset_id}"
-                
                 is_bagged = st.checkbox("Summited", value=row['Bagged'], key=unique_key)
-                
-                if is_bagged != row['Bagged']:
-                    if row['Mountain'] not in progress_df['Mountain'].values:
-                         new_row = pd.DataFrame([{'Mountain': row['Mountain'], 'Bagged': is_bagged}])
-                         progress_df = pd.concat([progress_df, new_row], ignore_index=True)
-                    else:
-                        progress_df.loc[progress_df['Mountain'] == row['Mountain'], 'Bagged'] = is_bagged
-                    progress_df.to_csv(PROGRESS_FILE, index=False)
-                    st.rerun()
+            
+            # Save Checkbox State Immediately
+            if is_bagged != row['Bagged']:
+                if row['Mountain'] not in progress_df['Mountain'].values:
+                        new_row = pd.DataFrame([{'Mountain': row['Mountain'], 'Bagged': is_bagged}])
+                        progress_df = pd.concat([progress_df, new_row], ignore_index=True)
+                else:
+                    progress_df.loc[progress_df['Mountain'] == row['Mountain'], 'Bagged'] = is_bagged
+                progress_df.to_csv(PROGRESS_FILE, index=False)
+                st.rerun()
 
-                if row['Bagged']:
+            # Logic only if Summited
+            if is_bagged:
+                with c2:
                     curr_date = None
                     try: 
                         if row['Date']: curr_date = datetime.strptime(row['Date'], "%Y-%m-%d")
                     except: pass
-                    new_date = st.date_input("Date", value=curr_date, key=f"date_{unique_key}")
+                    new_date = st.date_input("Date Reached", value=curr_date, key=f"date_{unique_key}", label_visibility="collapsed")
+                    
                     if str(new_date) != str(row['Date']) and new_date:
                         progress_df.loc[progress_df['Mountain'] == row['Mountain'], 'Date'] = str(new_date)
                         progress_df.to_csv(PROGRESS_FILE, index=False)
 
-            with c2:
-                if row['Bagged']:
-                    if row['Photo'] and os.path.exists(row['Photo']):
-                        st.image(row['Photo'], width=300)
-                        if st.button("Delete Photo", key=f"del_{unique_key}"):
-                            os.remove(row['Photo'])
-                            progress_df.loc[progress_df['Mountain'] == row['Mountain'], 'Photo'] = ''
-                            progress_df.to_csv(PROGRESS_FILE, index=False)
-                            st.rerun()
-                    else:
-                        up_file = st.file_uploader("Upload", type=['jpg','png'], key=f"up_{unique_key}", label_visibility="collapsed")
-                        if up_file:
-                            fname = f"{row['Mountain'].replace(' ','_')}_{idx}.jpg"
-                            fpath = os.path.join(PHOTOS_DIR, fname)
-                            img = Image.open(up_file)
-                            img.thumbnail((800,800))
-                            img.save(fpath)
-                            progress_df.loc[progress_df['Mountain'] == row['Mountain'], 'Photo'] = fpath
-                            progress_df.to_csv(PROGRESS_FILE, index=False)
-                            st.rerun()
+                # --- ROW 2: Activity Link ---
+                link_val = st.text_input("🔗 Activity Link (Strava/Garmin)", value=row['ActivityLink'], key=f"link_{unique_key}", placeholder="https://...")
+                if link_val != row['ActivityLink']:
+                    progress_df.loc[progress_df['Mountain'] == row['Mountain'], 'ActivityLink'] = link_val
+                    progress_df.to_csv(PROGRESS_FILE, index=False)
+                    # No rerun needed here to keep UI fluid
+
+                # --- ROW 3: Photo ---
+                st.write("📸 **Summit Photo**")
+                if row['Photo'] and os.path.exists(row['Photo']):
+                    st.image(row['Photo'], width=400)
+                    if st.button("Delete Photo", key=f"del_{unique_key}"):
+                        os.remove(row['Photo'])
+                        progress_df.loc[progress_df['Mountain'] == row['Mountain'], 'Photo'] = ''
+                        progress_df.to_csv(PROGRESS_FILE, index=False)
+                        st.rerun()
+                else:
+                    up_file = st.file_uploader("Upload", type=['jpg','png'], key=f"up_{unique_key}", label_visibility="collapsed")
+                    if up_file:
+                        fname = f"{row['Mountain'].replace(' ','_')}_{idx}.jpg"
+                        fpath = os.path.join(PHOTOS_DIR, fname)
+                        img = Image.open(up_file)
+                        img.thumbnail((800,800))
+                        img.save(fpath)
+                        progress_df.loc[progress_df['Mountain'] == row['Mountain'], 'Photo'] = fpath
+                        progress_df.to_csv(PROGRESS_FILE, index=False)
+                        st.rerun()
 
 with tab3:
     c_a, c_b = st.columns(2)
@@ -177,14 +201,9 @@ with tab4:
     st.download_button("💾 Backup Progress", csv, "welsh100_backup.csv", "text/csv")
     st.divider()
     
-    # --- UPDATED FACTORY RESET LOGIC ---
     if st.button("⚠️ Factory Reset"):
-        # 1. Delete the file
         if os.path.exists(PROGRESS_FILE):
             os.remove(PROGRESS_FILE)
-            
-        # 2. Increment the reset ID to invalidate all old checkboxes
         st.session_state.reset_id += 1
-        
         st.success("Reset complete. Refreshing...")
         st.rerun()
