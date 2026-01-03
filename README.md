@@ -7,6 +7,13 @@ A beautiful, modern web app for tracking your progress on the Welsh 100 mountain
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.4-red?style=flat-square)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue?style=flat-square)
 
+<p align="center">
+  <img src="Images/1.png" width="22%" />
+  <img src="Images/2.png" width="22%" />
+  <img src="Images/3.png" width="22%" />
+  <img src="Images/4.png" width="22%" />
+</p>
+
 ## ✨ Features
 
 - 🗺️ **Interactive Map** - Visualize all 100 peaks. Markers turn green as you bag them.
