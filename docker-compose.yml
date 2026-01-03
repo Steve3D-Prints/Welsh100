@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  welsh100:
+    container_name: g3-welsh100-1
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      # Maps the internal data folder to your host so progress is saved
+      - ./data:/data
+    environment:
+      - TZ=Europe/London
